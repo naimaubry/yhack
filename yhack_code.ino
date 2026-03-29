@@ -13,12 +13,57 @@ enum Scene {
   MAKING_TOFU
 };
 
+// process steps
+enum ProcessStep {
+  STEP_COMPRESS_HALF,
+  STEP_WAIT_20_MIN,
+  STEP_CUT_DOWN,
+  STEP_RETRACT_UP,
+  STEP_DISPENSE_SOY,
+  STEP_DISPENSE_SESAME,
+  STEP_PUSH_SYRINGE,
+  STEP_DONE
+};
+
+Scene currentScene = WELCOME;
+ProcessStep currentStep = STEP_COMPRESS_HALF;
+unsigned long stepStartTime = 0;
+
+// OLED SETUP
 #define SCREEN_WIDTH 128  // OLED width, in pixels
 #define SCREEN_HEIGHT 64  // OLED height, in pixels
-
 // Create an SSD1306 display object connected to I2C
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
+// PINS
+
+// buttons
+const int LEFT_BUTTON = 2;
+const int RIGHT_BUTTON = 3;
+const int ENTER_BUTTON = 4;
+// const int LED_PIN = 13;
+
+// actuators/servos
+const int actuatorPin = ;
+const int soyServoPin = ;
+const int sesameServoPin = ;
+const int syringeServoPin = ;
+
+// servo objects
+Servo soyServo;
+Servo sesameServo;
+Servo syringeServo;
+
+// user selections
+
+int soyLevel = 0;      
+int sesameLevel = 0;  
+const int maxAmount = 5;
+
+const int tofuHeight = ;
+int actuatorPosition =0;
+
+// BITMAPS
 // 'SillyTofu', 128x64px
 const unsigned char epd_bitmap_SillyTofu[] PROGMEM = {
   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -288,6 +333,7 @@ const unsigned char epd_bitmap_FinishedTofu[] PROGMEM = {
   0xff, 0xff, 0xff, 0xff, 0xff, 0xc0, 0x00, 0x00, 0x03, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
 };
 
+
 // SerLCD Setup
 void setupSerLCD() {
   Serial1.begin(9600);
@@ -311,12 +357,6 @@ void printSerLCD(const String &line1, const String &line2 = "") {
   }
 }
 
-// buttons
-const int LEFT_BUTTON = 2;
-const int RIGHT_BUTTON = 3;
-const int ENTER_BUTTON = 4;
-// const int LED_PIN = 13;
-
 bool leftPressed() {
   return digitalRead(LEFT_BUTTON) == LOW;
 }
@@ -333,9 +373,6 @@ int readPotPercent() {
   return map(analogRead(POT_PIN), 0, 1023, 0, 100);  // 0-100%
 }
 
-Scene currentScene = WELCOME;
-int soyLevel = 50;
-int sesameLevel = 50;
 
 void displaySceneBitmap(Scene scene) {
   display.clearDisplay();
@@ -359,21 +396,38 @@ void displaySceneBitmap(Scene scene) {
   display.display();
 }
 
+
+// SETUP
+
 void setup() {
 
   Serial.begin(9600);
+
+  // Initialize OLED
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+  display.clearDisplay();
+  display.display();
+
   // Buttons as input with pullups
   pinMode(LEFT_BUTTON, INPUT_PULLUP);
   pinMode(RIGHT_BUTTON, INPUT_PULLUP);
   pinMode(ENTER_BUTTON, INPUT_PULLUP);
+  pinMode(actuatorPin, OUTPUT);
 
   // pinMode(LED_PIN, OUTPUT);
 
+  soyServo.attach(soyServoPin);
+  sesameServo.attach(sesameServoPin);
+  syringeServo.attach(syringeServoPin);
+
+
   // SerLCD
-  Serial.print("Before LCD");
+  Serial.print("Start of LCD");
   setupSerLCD();
   printSerLCD("WELCOME", "\nClick ENTER");
-  Serial.print("After LCD");
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   display.clearDisplay();
   displaySceneBitmap(currentScene);
@@ -403,8 +457,14 @@ void loop() {
 
   // delay(200);  // small delay to make the output readable
 
+  pickSauce();
 
+  if (currentScene == MAKING_TOFU){
+    automateProcess();
+  }
+}
 
+void pickSauce() {
   static bool yesSelected = true;
   switch (currentScene) {
     case WELCOME:
@@ -509,6 +569,92 @@ void loop() {
     // =======================
     case MAKING_TOFU:
 
+      break;
+  }
+}
+
+void automateProcess() {
+  switch (currentStep) {
+    case STEP_COMPRESS_HALF:
+      printSerLCD("Compressing halfway...");
+
+      // move actuator halfway code
+      actuatorPosition = tofuHeight / 2;
+      analogWrite(actuatorPin, actuatorPosition);
+      delay(1000);
+      currentStep = STEP_WAIT_20_MIN;
+      stepStartTime = millis();
+      break;
+
+    case STEP_WAIT_20_MIN:
+      printSerLCD("Waiting 20 min");
+      if (millis() - stepStartTime > 20UL * 60UL * 1000UL) {
+        currentStep = STEP_CUT_DOWN;
+      }
+      break;
+
+    case STEP_CUT_DOWN:
+      printSerLCD("Cutting");
+
+      // insert code to move actuator full down
+      actuatorPosition = tofuHeight;
+      analogWrite(actuatorPin, actuatorPosition);
+      delay(1000);
+
+      currentStep = STEP_RETRACT_UP;
+      break;
+
+    case STEP_RETRACT_UP:
+      printSerLCD("Retracting..");
+
+      // insert code to move actuator up
+      actuatorPosition = 0;
+      analogWrite(actuatorPin, actuatorPosition);
+      delay(1000);
+
+      currentStep = STEP_DISPENSE_SOY;
+      break;
+
+    case STEP_DISPENSE_SOY:
+      printSerLCD("Soy", String(soyLevel) + "%");
+
+      // insert code to open soy valve
+      dispenseSauce(soyLevel, SOY);
+      // close soy valve
+
+      currentStep = STEP_DISPENSE_SESAME;
+      break;
+
+    case STEP_DISPENSE_SESAME:
+      printSerLCD("Sesame", String(sesameLevel) + "%");
+
+      // open sesame valve
+      dispenseSauce(sesameLevel, SESAME);
+      // close sesame valve
+
+      currentStep = STEP_PUSH_SYRINGE;
+      break;
+
+    case STEP_PUSH_SYRINGE:
+      printSerLCD("Injecting sauce");
+
+      // push syringe servo
+      pushSyringe();
+      delay(1000);
+
+      currentStep = STEP_DONE;
+      break;
+
+    case STEP_DONE:
+      printSerLCD("Done!", "Enjoy");
+
+      // servo to push tofu out of box
+      pushTofu();
+
+      delay(3000);
+
+      currentScene = WELCOME;
+      currentStep = STEP_COMPRESS_HALF;
       break;
   }
 }
