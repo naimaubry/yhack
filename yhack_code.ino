@@ -3,6 +3,7 @@
 #include <Adafruit_SSD1306.h>
 #include <Servo.h>
 #include <Arduino.h>
+#include <AccelStepper.h>
 
 // state machine
 enum Scene {
@@ -32,30 +33,40 @@ unsigned long stepStartTime = 0;
 // OLED SETUP
 #define SCREEN_WIDTH 128  // OLED width, in pixels
 #define SCREEN_HEIGHT 64  // OLED height, in pixels
-// Create an SSD1306 display object connected to I2C
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 // PINS
-
 // buttons
 const int LEFT_BUTTON = 2;
 const int RIGHT_BUTTON = 3;
 const int ENTER_BUTTON = 4;
-// const int LED_PIN = 13;
 
-// actuators/servos
-const int actuatorPin = ;
-const int soyServoPin = ;
-const int sesameServoPin = ;
-const int syringeServoPin = ;
+// potentiometer
+#define POT_PIN A0
 
-// servo objects
+// STEPPER PINS 
+
+//lead screw stepper
+#define LS_STEP_PIN 6
+#define LS_DIR_PIN 7
+AccelStepper leadScrew(AccelStepper::DRIVER, LS_STEP_PIN, LS_DIR_PIN);
+
+//valve stepper
+#define valve_STEP_PIN 8
+#define valve_DIR_PIN 9
+AccelStepper valveStepper(AccelStepper::DRIVER, VALVE_STEP_PIN, VALVE_DIR_PIN);
+
+// SERVOS
 Servo soyServo;
 Servo sesameServo;
-Servo syringeServo;
+
+const int soyServoPin = 10;
+const int sesameServoPin = 11;
+
+const int eject1 = 12;
+const int eject2 = 13;
 
 // user selections
-
 int soyLevel = 0;      
 int sesameLevel = 0;  
 const int maxAmount = 5;
@@ -368,7 +379,6 @@ bool enterPressed() {
 }
 
 // potentiometer
-#define POT_PIN A0
 int readPotPercent() {
   return map(analogRead(POT_PIN), 0, 1023, 0, 100);  // 0-100%
 }
@@ -396,6 +406,89 @@ void displaySceneBitmap(Scene scene) {
   display.display();
 }
 
+void moveStepperTo(long targetSteps) {
+  linearStepper.moveTo(targetSteps);
+  while (linearStepper.distanceToGo() != 0) {
+    linearStepper.run();  // non-blocking call that moves the motor
+  }
+}
+
+void setupMotorsAndServos() {
+    // Lead screw stepper
+    leadScrew.setMaxSpeed(500);
+    leadScrew.setAcceleration(100);
+
+    // Valve stepper
+    valveStepper.setMaxSpeed(300);
+    valveStepper.setAcceleration(50);
+
+    // Servos
+    soyServo.attach(soyServoPin);
+    sesameServo.attach(sesameServoPin);
+    // syringeServo.attach(syringeServoPin);
+
+    // Eject pins
+    pinMode(eject1, OUTPUT);
+    pinMode(eject2, OUTPUT);
+}
+
+
+// MOVEMENT FUNCTIONS
+
+// move lead screw to position
+void moveLeadScrew(long position) {
+  leadScrew.moveTo(position);
+  while (leadScrew.distanceToGo() != 0) {
+    leadScrew.run();
+  }
+}
+
+// move valve stepper by amount
+void moveValve(int steps) {
+  valveStepper.move(steps); // relative move
+  while (valveStepper.distanceToGo() != 0) {
+    valveStepper.run();
+  }
+}
+
+// move soy servo to level 0-180
+void moveSoyServo(int angle) {
+  soyServo.write(angle);
+  delay(300); // small delay for motion
+}
+
+// move sesame servo to level 0-180
+void moveSesameServo(int angle) {
+  sesameServo.write(angle);
+  delay(300);
+}
+
+// // push syringe
+// void pushSyringe(int angle) {
+//   syringeServo.write(angle);
+//   delay(500); // longer delay for full push
+// }
+
+// EJECT FUNCTIONS
+void activateEject1(unsigned long durationMs = 500) {
+  digitalWrite(eject1, HIGH);
+  delay(durationMs);
+  digitalWrite(eject1, LOW);
+}
+
+void activateEject2(unsigned long durationMs = 500) {
+  digitalWrite(eject2, HIGH);
+  delay(durationMs);
+  digitalWrite(eject2, LOW);
+}
+
+void activateBothEjectors(unsigned long durationMs = 500) {
+  digitalWrite(eject1, HIGH);
+  digitalWrite(eject2, HIGH);
+  delay(durationMs);
+  digitalWrite(eject1, LOW);
+  digitalWrite(eject2, LOW);
+}
 
 // SETUP
 
@@ -415,14 +508,10 @@ void setup() {
   pinMode(LEFT_BUTTON, INPUT_PULLUP);
   pinMode(RIGHT_BUTTON, INPUT_PULLUP);
   pinMode(ENTER_BUTTON, INPUT_PULLUP);
-  pinMode(actuatorPin, OUTPUT);
+
+  setupMotorsandServos();
 
   // pinMode(LED_PIN, OUTPUT);
-
-  soyServo.attach(soyServoPin);
-  sesameServo.attach(sesameServoPin);
-  syringeServo.attach(syringeServoPin);
-
 
   // SerLCD
   Serial.print("Start of LCD");
@@ -580,7 +669,7 @@ void automateProcess() {
 
       // move actuator halfway code
       actuatorPosition = tofuHeight / 2;
-      analogWrite(actuatorPin, actuatorPosition);
+      moveLeadScrew()
       delay(1000);
       currentStep = STEP_WAIT_20_MIN;
       stepStartTime = millis();
@@ -598,7 +687,7 @@ void automateProcess() {
 
       // insert code to move actuator full down
       actuatorPosition = tofuHeight;
-      analogWrite(actuatorPin, actuatorPosition);
+      moveLeadScrew()
       delay(1000);
 
       currentStep = STEP_RETRACT_UP;
@@ -609,7 +698,7 @@ void automateProcess() {
 
       // insert code to move actuator up
       actuatorPosition = 0;
-      analogWrite(actuatorPin, actuatorPosition);
+      moveLeadScrew(0);
       delay(1000);
 
       currentStep = STEP_DISPENSE_SOY;
@@ -619,9 +708,9 @@ void automateProcess() {
       printSerLCD("Soy", String(soyLevel) + "%");
 
       // insert code to open soy valve
-      dispenseSauce(soyLevel, SOY);
+      moveSoyServo();
       // close soy valve
-
+      moveSoyServo();
       currentStep = STEP_DISPENSE_SESAME;
       break;
 
@@ -629,9 +718,9 @@ void automateProcess() {
       printSerLCD("Sesame", String(sesameLevel) + "%");
 
       // open sesame valve
-      dispenseSauce(sesameLevel, SESAME);
+      moveSoyServo();
       // close sesame valve
-
+      moveSoyServo();
       currentStep = STEP_PUSH_SYRINGE;
       break;
 
@@ -639,7 +728,8 @@ void automateProcess() {
       printSerLCD("Injecting sauce");
 
       // push syringe servo
-      pushSyringe();
+      moveValve();
+      moveValve();
       delay(1000);
 
       currentStep = STEP_DONE;
@@ -649,7 +739,7 @@ void automateProcess() {
       printSerLCD("Done!", "Enjoy");
 
       // servo to push tofu out of box
-      pushTofu();
+      activateBothEjectors();
 
       delay(3000);
 
