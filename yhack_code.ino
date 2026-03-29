@@ -54,7 +54,7 @@ AccelStepper leadScrew(AccelStepper::DRIVER, LS_STEP_PIN, LS_DIR_PIN);
 //valve stepper
 #define valve_STEP_PIN 8
 #define valve_DIR_PIN 9
-AccelStepper valveStepper(AccelStepper::DRIVER, VALVE_STEP_PIN, VALVE_DIR_PIN);
+AccelStepper valveStepper(AccelStepper::DRIVER, valve_STEP_PIN, valve_DIR_PIN);
 
 // SERVOS
 Servo soyServo;
@@ -71,8 +71,16 @@ int soyLevel = 0;
 int sesameLevel = 0;  
 const int maxAmount = 5;
 
-const int tofuHeight = ;
-int actuatorPosition =0;
+// step parameters
+
+const long LEADSCREW_PRESS_STEPS = 1200;
+const long LEADSCREW_CUT_STEPS = 2200; 
+const int SOY_SERVO_CLOSED = 0;
+const int SOY_SERVO_OPEN = 90;
+const int SESAME_SERVO_CLOSED = 0;
+const int SESAME_SERVO_OPEN = 90;
+const int VALVE_PUSH_STEPS = 400;
+const int VALVE_RETRACT_STEPS = -400;
 
 // BITMAPS
 // 'SillyTofu', 128x64px
@@ -406,13 +414,6 @@ void displaySceneBitmap(Scene scene) {
   display.display();
 }
 
-void moveStepperTo(long targetSteps) {
-  linearStepper.moveTo(targetSteps);
-  while (linearStepper.distanceToGo() != 0) {
-    linearStepper.run();  // non-blocking call that moves the motor
-  }
-}
-
 void setupMotorsAndServos() {
     // Lead screw stepper
     leadScrew.setMaxSpeed(500);
@@ -509,16 +510,14 @@ void setup() {
   pinMode(RIGHT_BUTTON, INPUT_PULLUP);
   pinMode(ENTER_BUTTON, INPUT_PULLUP);
 
-  setupMotorsandServos();
+  setupMotorsAndServos();
 
   // pinMode(LED_PIN, OUTPUT);
 
   // SerLCD
   Serial.print("Start of LCD");
   setupSerLCD();
-  printSerLCD("WELCOME", "\nClick ENTER");
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  display.clearDisplay();
+  printSerLCD("WELCOME", "Click ENTER");
   displaySceneBitmap(currentScene);
 }
 
@@ -668,11 +667,9 @@ void automateProcess() {
       printSerLCD("Compressing halfway...");
 
       // move actuator halfway code
-      actuatorPosition = tofuHeight / 2;
-      moveLeadScrew()
-      delay(1000);
-      currentStep = STEP_WAIT_20_MIN;
+      moveLeadScrew(LEADSCREW_PRESS_STEPS);
       stepStartTime = millis();
+      currentStep = STEP_WAIT_20_MIN;
       break;
 
     case STEP_WAIT_20_MIN:
@@ -686,8 +683,7 @@ void automateProcess() {
       printSerLCD("Cutting");
 
       // insert code to move actuator full down
-      actuatorPosition = tofuHeight;
-      moveLeadScrew()
+      moveLeadScrew(LEADSCREW_CUT_STEPS);
       delay(1000);
 
       currentStep = STEP_RETRACT_UP;
@@ -697,7 +693,6 @@ void automateProcess() {
       printSerLCD("Retracting..");
 
       // insert code to move actuator up
-      actuatorPosition = 0;
       moveLeadScrew(0);
       delay(1000);
 
@@ -707,10 +702,9 @@ void automateProcess() {
     case STEP_DISPENSE_SOY:
       printSerLCD("Soy", String(soyLevel) + "%");
 
-      // insert code to open soy valve
-      moveSoyServo();
-      // close soy valve
-      moveSoyServo();
+      moveSoyServo(SOY_SERVO_OPEN);
+      delay(map(soyLevel, 0, 100, 0, 1500));
+      moveSoyServo(SOY_SERVO_CLOSED);
       currentStep = STEP_DISPENSE_SESAME;
       break;
 
@@ -718,9 +712,10 @@ void automateProcess() {
       printSerLCD("Sesame", String(sesameLevel) + "%");
 
       // open sesame valve
-      moveSoyServo();
+      moveSesameServo(SESAME_SERVO_OPEN);
+      delay(map(sesameLevel, 0, 100, 0, 1500));
       // close sesame valve
-      moveSoyServo();
+      moveSesameServo(SESAME_SERVO_CLOSED);
       currentStep = STEP_PUSH_SYRINGE;
       break;
 
@@ -728,9 +723,9 @@ void automateProcess() {
       printSerLCD("Injecting sauce");
 
       // push syringe servo
-      moveValve();
-      moveValve();
-      delay(1000);
+      moveValve(VALVE_PUSH_STEPS);
+      delay(500);
+      moveValve(VALVE_RETRACT_STEPS);
 
       currentStep = STEP_DONE;
       break;
@@ -749,14 +744,3 @@ void automateProcess() {
   }
 }
 
-// // sweep servo from 0° to 180°
-// for (int pos = 0; pos <= 180; pos += 1) {
-//   myServo.write(pos);
-//   delay(15);
-// }
-
-// // sweep back from 180° to 0°
-// for (int pos = 180; pos >= 0; pos -= 1) {
-//   myServo.write(pos);
-//   delay(15);
-// }
